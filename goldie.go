@@ -10,11 +10,14 @@ package goldie
 
 import (
 	"bytes"
+	"compress/gzip"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"text/template"
 )
@@ -89,29 +92,55 @@ func AssertWithTemplate(t *testing.T, name string, data interface{}, actualData 
 // can be explicitly called if needed. The more common approach would be to
 // update using `go test -update ./...`.
 func Update(name string, actualData []byte) error {
-	if err := ensureDir(filepath.Dir(goldenFileName(name))); err != nil {
+	fn := goldenFileName(name)
+	if err := ensureDir(filepath.Dir(fn)); err != nil {
 		return err
 	}
-
-	return ioutil.WriteFile(goldenFileName(name), actualData, FilePerms)
+	fp, err := os.Create(fn)
+	if err != nil {
+		return err
+	}
+	defer fp.Close()
+	if strings.HasSuffix(fn, ".gz") {
+		gz := gzip.NewWriter(fp)
+		defer gz.Close()
+		_, err := io.Copy(gz, bytes.NewReader(actualData))
+		return err
+	}
+	_, err = io.Copy(fp, bytes.NewReader(actualData))
+	return err
 }
 
 // compare is reading the golden fixture file and compare the stored data with
 // the actual data.
 func compare(name string, data interface{}, actualData []byte) error {
-	expectedDataTmpl, err := ioutil.ReadFile(goldenFileName(name))
-
+	fn := goldenFileName(name)
+	var (
+		expectedDataTmpl []byte
+		err              error
+	)
+	fp, err := os.Open(fn)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return newErrFixtureNotFound()
+		return err
+	}
+	defer fp.Close()
+	if strings.HasSuffix(fn, ".gz") {
+		gz, err := gzip.NewReader(fp)
+		if err != nil {
+			return err
 		}
-
-		return fmt.Errorf("Expected %s to be nil", err.Error())
+		defer gz.Close()
+		expectedDataTmpl, err = ioutil.ReadAll(gz)
+	} else {
+		expectedDataTmpl, err = ioutil.ReadAll(fp)
+	}
+	if err != nil {
+		return fmt.Errorf("Expected %+v to be nil", err)
 	}
 
 	tmpl, err := template.New("test").Parse(string(expectedDataTmpl))
 	if err != nil {
-		return fmt.Errorf("Expected %s to be nil", err.Error())
+		return fmt.Errorf("Expected %+v to be nil", err)
 	}
 
 	var expectedData bytes.Buffer
@@ -152,5 +181,10 @@ func ensureDir(loc string) error {
 
 // goldenFileName simply returns the file name of the golden file fixture.
 func goldenFileName(name string) string {
-	return filepath.Join(FixtureDir, fmt.Sprintf("%s%s", name, FileNameSuffix))
+	suffix := FileNameSuffix
+	if ext := filepath.Ext(name); ext == ".gz" {
+		name = strings.TrimSuffix(name, ext)
+		suffix = suffix + ".gz"
+	}
+	return filepath.Join(FixtureDir, fmt.Sprintf("%s%s", name, suffix))
 }
