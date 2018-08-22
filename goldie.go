@@ -54,6 +54,7 @@ var (
 // within the package. Also it should be a valid file name (so keeping to
 // `a-z0-9\-\_` is a good idea).
 func Assert(t *testing.T, name string, actualData []byte) {
+	t.Helper()
 	AssertWithTemplate(t, name, nil, actualData)
 }
 
@@ -64,6 +65,7 @@ func Assert(t *testing.T, name string, actualData []byte) {
 // within the package. Also it should be a valid file name (so keeping to
 // `a-z0-9\-\_` is a good idea).
 func AssertWithTemplate(t *testing.T, name string, data interface{}, actualData []byte) {
+	t.Helper()
 	if *update {
 		err := Update(name, actualData)
 		if err != nil {
